@@ -1,0 +1,91 @@
+/**
+ * @fileoverview Firestore Security Rules for ModuleMind AI.
+ *
+ * Core Philosophy:
+ * This ruleset enforces a strict user-ownership model for user profiles and their associated memories.
+ * Only the authenticated user can create, read, update, or delete their own data.
+ *
+ * Data Structure:
+ * - /users/{userId}: Stores user profile information. Each user document is identified by the user's UID.
+ * - /users/{userId}/memories/{memoryId}: Stores memory entries for each user.  Each memory document is owned by the user specified in the path.
+ *
+ * Key Security Decisions:
+ * - Users can only manage their own data (profiles and memories).
+ * - Listing all users is disallowed.
+ * - The 'userId' field in the Memory entity is redundant given the path-based ownership, but is retained for potential future use cases and improved data readability.
+ *
+ * Denormalization for Authorization:
+ *  - The 'Memory' documents do NOT need to denormalize the 'userId' field, as it is already available via the path.  However, the field is included for future flexibility.
+ */
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /**
+     * @description Protects the /users collection to enforce user-owned data.
+     * @path /users/{userId}
+     * @allow (create) - If the authenticated user's ID matches the userId in the path.
+     * @allow (get, update, delete) - If the authenticated user's ID matches the userId in the path and document exists.
+     * @deny (list) - Listing all users is not permitted.
+     * @deny (create) - If the authenticated user's ID does not match the userId in the path.
+     * @deny (get, update, delete) - If the authenticated user's ID does not match the userId in the path or document does not exists.
+     * @principle Enforces document ownership for all operations in users path.
+     */
+    match /users/{userId} {
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      function isOwner(userId) {
+        return request.auth.uid == userId;
+      }
+
+      function isExistingOwner(userId) {
+          return isOwner(userId) && resource != null;
+      }
+
+      // Allow the user to create their own profile, but only if the userId matches their auth.uid.
+      allow create: if isSignedIn() && isOwner(userId);
+      // Allow the user to read their own profile.
+      allow get: if isExistingOwner(userId);
+      // Allow the user to update their own profile.
+      allow update: if isExistingOwner(userId);
+      // Allow the user to delete their own profile.
+      allow delete: if isExistingOwner(userId);
+      // Do not allow listing all users.
+      allow list: if false;
+    }
+
+    /**
+     * @description Protects the /users/{userId}/memories collection to enforce user-owned data.
+     * @path /users/{userId}/memories/{memoryId}
+     * @allow (create, get, update, delete, list) - If the authenticated user's ID matches the userId in the path and document exists (for update/delete).
+     * @deny (create, get, update, delete, list) - If the authenticated user's ID does not match the userId in the path or document does not exists (for update/delete).
+     * @principle Enforces document ownership for all operations under a user's memories path.
+     */
+    match /users/{userId}/memories/{memoryId} {
+       function isSignedIn() {
+        return request.auth != null;
+      }
+
+      function isOwner(userId) {
+        return request.auth.uid == userId;
+      }
+
+      function isExistingOwner(userId) {
+          return isOwner(userId) && resource != null;
+      }
+
+      // Allow the user to create a memory if the userId matches their auth.uid.
+      allow create: if isSignedIn() && isOwner(userId);
+      // Allow the user to get their own memory if the userId matches their auth.uid.
+      allow get: if isExistingOwner(userId);
+      // Allow the user to update their own memory if the userId matches their auth.uid.
+      allow update: if isExistingOwner(userId);
+      // Allow the user to delete their own memory if the userId matches their auth.uid.
+      allow delete: if isExistingOwner(userId);
+      // Allow the user to list their own memories.
+      allow list: if isOwner(userId);
+    }
+  }
+}
